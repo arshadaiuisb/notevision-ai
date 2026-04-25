@@ -1,0 +1,7 @@
+anthropic
+streamlit
+gtts
+moviepy
+Pillow
+PyMuPDF
+numpy
