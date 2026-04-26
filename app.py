@@ -80,7 +80,7 @@ def extract_pdf(f) -> str:
 
 def generate_script(content: str, minutes: int, api_key: str) -> str:
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.0-flash")
     words = minutes * 140
     prompt = f"""You are an expert narrator creating a {minutes}-minute audio/video overview script.
 Write approximately {words} words.
