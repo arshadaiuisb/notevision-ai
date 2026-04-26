@@ -6,3 +6,4 @@ Pillow
 PyMuPDF
 numpy
 opencv-python-headless
+pydub
