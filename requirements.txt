@@ -1,5 +1,5 @@
-anthropic
 streamlit
+google-generativeai
 gtts
 moviepy
 Pillow
