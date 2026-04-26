@@ -360,9 +360,9 @@ with st.sidebar:
             with st.spinner("Reading…"):
                 pdf_txt=extract_pdf(up)
             if pdf_txt:
-    st.success(f"✅ {len(pdf_txt)} chars extracted")
-else:
-    st.error("Could not read PDF")
+                st.success(f"✅ {len(pdf_txt)} chars extracted")
+            else:
+                st.error("Could not read PDF")
 
     st.markdown('<div class="sec">⚙️ Settings</div>',unsafe_allow_html=True)
     minutes=st.select_slider("Duration",[5,8,10,12],value=5,
