@@ -5,3 +5,4 @@ moviepy
 Pillow
 PyMuPDF
 numpy
+opencv-python-headless
