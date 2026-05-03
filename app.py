@@ -9,7 +9,7 @@ try:
 except ImportError:
     PDF_OK = False
 
-# ── TTS — edge-tts preferred, gTTS fallback ──────────────────
+# ── TTS ──────────────────────────────────────────────────────
 try:
     import edge_tts
     import asyncio
@@ -62,6 +62,9 @@ st.markdown("""
              padding:12px;color:#7dc47d;font-size:.9rem}
 .info-box{background:#1a1d2e;border:1px solid #2a2d3e;border-radius:8px;
           padding:10px;color:#b0b3cc;font-size:.85rem;line-height:1.6}
+.urdu-box{direction:rtl;text-align:right;font-size:1.1rem;
+          line-height:2;color:#c4c7e0;padding:10px;
+          background:#1a1d2e;border-radius:8px;border:1px solid #2a2d3e}
 div[data-testid="stButton"]>button{
   background:linear-gradient(135deg,#667eea,#764ba2)!important;
   color:#fff!important;border:none!important;border-radius:10px!important;
@@ -70,17 +73,24 @@ div[data-testid="stButton"]>button{
 """, unsafe_allow_html=True)
 
 # ── Voice definitions ─────────────────────────────────────────
-FEMALE_VOICES = {
-    "Aria — American Female 🇺🇸":    "en-US-AriaNeural",
-    "Jenny — American Female 🇺🇸":   "en-US-JennyNeural",
-    "Sonia — British Female 🇬🇧":    "en-GB-SoniaNeural",
-    "Natasha — Australian Female 🇦🇺":"en-AU-NatashaNeural",
+
+ENGLISH_FEMALE = {
+    "Aria — American 🇺🇸":     "en-US-AriaNeural",
+    "Jenny — American 🇺🇸":    "en-US-JennyNeural",
+    "Sonia — British 🇬🇧":     "en-GB-SoniaNeural",
+    "Natasha — Australian 🇦🇺":"en-AU-NatashaNeural",
 }
-MALE_VOICES = {
-    "Guy — American Male 🇺🇸":       "en-US-GuyNeural",
-    "Eric — American Male 🇺🇸":      "en-US-EricNeural",
-    "Ryan — British Male 🇬🇧":       "en-GB-RyanNeural",
-    "William — Australian Male 🇦🇺": "en-AU-WilliamNeural",
+ENGLISH_MALE = {
+    "Guy — American 🇺🇸":      "en-US-GuyNeural",
+    "Eric — American 🇺🇸":     "en-US-EricNeural",
+    "Ryan — British 🇬🇧":      "en-GB-RyanNeural",
+    "William — Australian 🇦🇺":"en-AU-WilliamNeural",
+}
+URDU_FEMALE = {
+    "Uzma — اردو خاتون 🇵🇰":   "ur-PK-UzmaNeural",
+}
+URDU_MALE = {
+    "Asad — اردو مرد 🇵🇰":     "ur-PK-AsadNeural",
 }
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -98,21 +108,41 @@ def extract_pdf(f) -> str:
     doc.close(); os.unlink(path)
     return txt[:10000]
 
-def generate_script(content, minutes, key):
+def generate_script(content, minutes, key, language="English"):
     client = Groq(api_key=key)
     words  = minutes * 130
+
+    if language == "اردو":
+        system_prompt = (
+            f"آپ ایک پیشہ ور دستاویزی راوی ہیں۔ "
+            f"ایک {minutes} منٹ کا اردو بیانیہ اسکرپٹ لکھیں — کم از کم {words} الفاظ۔ "
+            "اسکرپٹ کو 8 سے 12 حصوں میں تقسیم کریں۔ "
+            "ہر حصے کا عنوان '## ' سے شروع کریں۔ "
+            "قدرتی، روانی اردو میں لکھیں جیسے زبانی بول رہے ہوں۔ "
+            "کوئی بلٹ پوائنٹ نہیں۔ صرف بہتا ہوا نثر۔ "
+            "مکمل اردو رسم الخط استعمال کریں۔"
+        )
+        user_prompt = (
+            f"اس موضوع پر {minutes} منٹ کا مکمل اردو بیانیہ اسکرپٹ لکھیں:\n\n{content[:7000]}"
+        )
+    else:
+        system_prompt = (
+            f"You are a professional documentary narrator. "
+            f"Write a {minutes}-minute spoken narration script — exactly {words} words minimum. "
+            "Divide into 8-12 sections. Start every section heading with '## ' on its own line. "
+            "Each section must have at least 3-4 full paragraphs. "
+            "Write naturally as if speaking aloud. No bullet points. Only flowing prose."
+        )
+        user_prompt = (
+            f"Write a full {minutes}-minute narration script about:\n\n{content[:7000]}"
+        )
+
     r = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         max_tokens=6000,
         messages=[
-            {"role":"system","content":(
-                f"You are a professional documentary narrator. "
-                f"Write a {minutes}-minute spoken narration script — exactly {words} words minimum. "
-                "Divide into 8-12 sections. Start every section heading with '## ' on its own line. "
-                "Each section must have at least 3-4 full paragraphs of narration text. "
-                "Write naturally as if speaking aloud. No bullet points. Only flowing prose.")},
-            {"role":"user","content":
-                f"Write a full {minutes}-minute narration script about:\n\n{content[:7000]}"}
+            {"role":"system","content": system_prompt},
+            {"role":"user",  "content": user_prompt}
         ])
     return r.choices[0].message.content
 
@@ -130,9 +160,9 @@ def build_slides(script):
         slides = [{"title": f"Section {i+1}", "body": c} for i,c in enumerate(chunks)]
     return slides
 
-# ── TTS functions ─────────────────────────────────────────────
+# ── TTS ───────────────────────────────────────────────────────
 
-async def _edge_tts_save(text, voice, path):
+async def _edge_save(text, voice, path):
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(path)
 
@@ -140,31 +170,27 @@ def generate_mp3_edge(script, voice_id) -> bytes:
     clean = re.sub(r'^##[^\n]*', '', script, flags=re.MULTILINE).strip()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
         path = f.name
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(_edge_tts_save(clean, voice_id, path))
-        loop.close()
-    except Exception as e:
-        raise Exception(f"edge-tts failed: {e}")
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(_edge_save(clean, voice_id, path))
+    loop.close()
     data = open(path, "rb").read()
     os.unlink(path)
     return data
 
-def generate_mp3_gtts(script) -> bytes:
-    clean = re.sub(r'^##[^\n]*', '', script, flags=re.MULTILINE).strip()
+def generate_mp3_gtts(script, lang="en") -> bytes:
+    clean  = re.sub(r'^##[^\n]*', '', script, flags=re.MULTILINE).strip()
     chunks = [clean[i:i+4500] for i in range(0, len(clean), 4500)]
-    tmp = tempfile.mkdtemp()
-    parts = []
+    tmp    = tempfile.mkdtemp()
+    parts  = []
     for i, chunk in enumerate(chunks):
-        tts = gTTS(text=chunk, lang='en', slow=False)
-        p = os.path.join(tmp, f"part{i}.mp3")
-        tts.save(p); parts.append(p)
+        tts = gTTS(text=chunk, lang=lang, slow=False)
+        p   = os.path.join(tmp, f"p{i}.mp3"); tts.save(p); parts.append(p)
     merged = os.path.join(tmp, "merged.mp3")
     with open(merged, "wb") as out:
         for p in parts:
-            with open(p, "rb") as f: out.write(f.read())
-    data = open(merged, "rb").read()
+            with open(p,"rb") as f: out.write(f.read())
+    data = open(merged,"rb").read()
     for p in parts:
         try: os.unlink(p)
         except: pass
@@ -172,111 +198,114 @@ def generate_mp3_gtts(script) -> bytes:
     except: pass
     return data
 
-def generate_mp3(script, voice_id="en-US-AriaNeural") -> bytes:
+def generate_mp3(script, voice_id="en-US-AriaNeural", lang="en") -> bytes:
     if TTS_ENGINE == "edge":
         return generate_mp3_edge(script, voice_id)
     else:
-        return generate_mp3_gtts(script)
+        return generate_mp3_gtts(script, lang)
 
 def get_audio_duration(mp3_bytes) -> float:
     if PYDUB_OK:
         try:
             seg = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
-            return len(seg) / 1000.0
+            return len(seg)/1000.0
         except: pass
-    return len(mp3_bytes) * 8 / (128 * 1000)
+    return len(mp3_bytes)*8/(128*1000)
 
-# ── Slide & Video ─────────────────────────────────────────────
+# ── Slide drawing ─────────────────────────────────────────────
 
-def make_slide(slide, idx, total, W=1280, H=720):
-    img  = Image.new("RGB", (W, H), "#0f1117")
+def make_slide(slide, idx, total, language="English", W=1280, H=720):
+    img  = Image.new("RGB",(W,H),"#0f1117")
     draw = ImageDraw.Draw(img)
     for i in range(H):
-        r = int(15+10*(i/H)); g = int(17+8*(i/H)); b = int(23+20*(i/H))
-        draw.line([(0,i),(W,i)], fill=(r,g,b))
-    for r in range(160, 0, -4):
-        draw.ellipse([W-110-r, 90-r, W-110+r, 90+r], fill=(102,126,234))
-    try:
-        ft = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 52)
-        fb = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24)
-        fs = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
-        fh = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
-    except:
-        try:
-            ft = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", 52)
-            fb = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 24)
-            fs = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", 16)
-            fh = ImageFont.truetype("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf", 20)
-        except:
-            ft = fb = fs = fh = ImageFont.load_default()
+        r=int(15+10*(i/H)); g=int(17+8*(i/H)); b=int(23+20*(i/H))
+        draw.line([(0,i),(W,i)],fill=(r,g,b))
+    for r in range(160,0,-4):
+        draw.ellipse([W-110-r,90-r,W-110+r,90+r],fill=(102,126,234))
 
-    draw.rectangle([0,0,W,70], fill=(26,29,46))
-    draw.rectangle([0,68,W,70], fill=(102,126,234))
-    draw.text((30,24), "📚 NoteVision AI", fill=(167,139,250), font=fh)
-    draw.text((W-120,24), f"Slide {idx+1} of {total}", fill=(139,143,168), font=fs)
-    draw.rectangle([0,H-12,W,H], fill=(26,29,46))
-    pw = int(W*(idx+1)/total)
-    draw.rectangle([0,H-12,pw,H], fill=(102,126,234))
-    draw.rectangle([60,100,190,138], fill=(45,53,101))
-    draw.text((70,108), f"SECTION {idx+1}", fill=(167,139,250), font=fs)
-    title = slide["title"][:52]+("..." if len(slide["title"])>52 else "")
+    # Try fonts
+    try:
+        ft=ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",44)
+        fb=ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",22)
+        fs=ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",15)
+        fh=ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",18)
+    except:
+        ft=fb=fs=fh=ImageFont.load_default()
+
+    # Header
+    draw.rectangle([0,0,W,70],fill=(26,29,46))
+    draw.rectangle([0,68,W,70],fill=(102,126,234))
+    header_txt = "📚 NoteVision AI — اردو" if language=="اردو" else "📚 NoteVision AI"
+    draw.text((30,24), header_txt, fill=(167,139,250), font=fh)
+    draw.text((W-120,24), f"{idx+1} / {total}", fill=(139,143,168), font=fs)
+
+    # Progress bar
+    draw.rectangle([0,H-12,W,H],fill=(26,29,46))
+    pw=int(W*(idx+1)/total)
+    draw.rectangle([0,H-12,pw,H],fill=(102,126,234))
+
+    # Section badge
+    sec_txt = f"حصہ {idx+1}" if language=="اردو" else f"SECTION {idx+1}"
+    draw.rectangle([60,100,220,138],fill=(45,53,101))
+    draw.text((70,108), sec_txt, fill=(167,139,250), font=fs)
+
+    # Title
+    title=slide["title"][:50]+("..." if len(slide["title"])>50 else "")
     draw.text((60,155), title, fill=(255,255,255), font=ft)
-    try: tw = draw.textlength(title, font=ft)
-    except: tw = min(len(title)*30, W-120)
-    draw.rectangle([60,218,60+min(int(tw),W-120),222], fill=(102,126,234))
-    body = slide["body"][:520]+("..." if len(slide["body"])>520 else "")
-    wrapped = textwrap.wrap(body, width=72)
-    y = 245
+    try: tw=draw.textlength(title,font=ft)
+    except: tw=min(len(title)*26,W-120)
+    draw.rectangle([60,210,60+min(int(tw),W-120),213],fill=(102,126,234))
+
+    # Body
+    body=slide["body"][:500]+("..." if len(slide["body"])>500 else "")
+    wrapped=textwrap.wrap(body, width=68)
+    y=235
     for line in wrapped:
-        if y > H-55: break
+        if y>H-55: break
         draw.text((60,y), line, fill=(176,179,204), font=fb)
-        y += 36
-    draw.rectangle([0,H-44,W,H-13], fill=(15,17,23))
-    draw.text((60,H-38),
-        "Generated by NoteVision AI  •  Powered by Groq & Llama 3  •  Free Edition",
-        fill=(74,78,106), font=fs)
+        y+=34
+
+    # Footer
+    draw.rectangle([0,H-44,W,H-13],fill=(15,17,23))
+    footer = "NoteVision AI  •  Groq & Llama 3  •  اردو ایڈیشن" if language=="اردو" \
+             else "Generated by NoteVision AI  •  Powered by Groq & Llama 3"
+    draw.text((60,H-38), footer, fill=(74,78,106), font=fs)
     return img
 
-def generate_video(slides, mp3_bytes, target_mins, prog_cb=None) -> bytes:
+# ── Video ─────────────────────────────────────────────────────
+
+def generate_video(slides, mp3_bytes, target_mins, language, prog_cb=None) -> bytes:
     if not CV2_OK or not PIL_OK: return None
-    W, H, FPS = 1280, 720, 24
-    tmp = tempfile.mkdtemp()
-    audio_dur = max(get_audio_duration(mp3_bytes), target_mins*60)
-    secs_per  = audio_dur / len(slides)
-    if prog_cb: prog_cb(f"🎬 Rendering {len(slides)} slides × {secs_per:.1f}s…")
-    silent = os.path.join(tmp, "silent.mp4")
-    writer = cv2.VideoWriter(silent, cv2.VideoWriter_fourcc(*"mp4v"), FPS, (W,H))
-    for i, slide in enumerate(slides):
+    W,H,FPS = 1280,720,24
+    tmp      = tempfile.mkdtemp()
+    dur      = max(get_audio_duration(mp3_bytes), target_mins*60)
+    sps      = dur/len(slides)
+    if prog_cb: prog_cb(f"🎬 Rendering {len(slides)} slides × {sps:.1f}s…")
+    silent   = os.path.join(tmp,"silent.mp4")
+    writer   = cv2.VideoWriter(silent, cv2.VideoWriter_fourcc(*"mp4v"), FPS,(W,H))
+    for i,slide in enumerate(slides):
         if prog_cb: prog_cb(f"🎨 Slide {i+1}/{len(slides)}…")
-        frame = cv2.cvtColor(np.array(make_slide(slide,i,len(slides),W,H)), cv2.COLOR_RGB2BGR)
-        for _ in range(int(FPS*secs_per)):
-            writer.write(frame)
+        frame=cv2.cvtColor(np.array(make_slide(slide,i,len(slides),language,W,H)),cv2.COLOR_RGB2BGR)
+        for _ in range(int(FPS*sps)): writer.write(frame)
     writer.release()
-    audio_path = os.path.join(tmp, "audio.mp3")
-    with open(audio_path, "wb") as f: f.write(mp3_bytes)
-    final = os.path.join(tmp, "final.mp4")
+    ap=os.path.join(tmp,"audio.mp3")
+    with open(ap,"wb") as f: f.write(mp3_bytes)
+    final=os.path.join(tmp,"final.mp4")
     if prog_cb: prog_cb("🔊 Merging audio into video…")
-    ret = os.system(
-        f'ffmpeg -y -i "{silent}" -i "{audio_path}" '
-        f'-c:v copy -c:a aac -shortest "{final}" -loglevel error')
-    if ret == 0 and os.path.exists(final) and os.path.getsize(final) > 10000:
-        data = open(final, "rb").read()
+    ret=os.system(f'ffmpeg -y -i "{silent}" -i "{ap}" -c:v copy -c:a aac -shortest "{final}" -loglevel error')
+    if ret==0 and os.path.exists(final) and os.path.getsize(final)>10000:
+        data=open(final,"rb").read()
     else:
-        if prog_cb: prog_cb("🎬 Trying moviepy fallback…")
         try:
-            from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_audioclips
-            vc = VideoFileClip(silent)
-            ac = AudioFileClip(audio_path)
-            if ac.duration < vc.duration:
-                loops = int(vc.duration/ac.duration)+1
-                ac = concatenate_audioclips([ac]*loops).subclip(0, vc.duration)
-            else:
-                ac = ac.subclip(0, vc.duration)
-            vc.set_audio(ac).write_videofile(final, codec="libx264",
-                audio_codec="aac", verbose=False, logger=None)
-            data = open(final, "rb").read()
-        except:
-            data = open(silent, "rb").read()
+            from moviepy.editor import VideoFileClip,AudioFileClip,concatenate_audioclips
+            vc=VideoFileClip(silent); ac=AudioFileClip(ap)
+            if ac.duration<vc.duration:
+                loops=int(vc.duration/ac.duration)+1
+                ac=concatenate_audioclips([ac]*loops).subclip(0,vc.duration)
+            else: ac=ac.subclip(0,vc.duration)
+            vc.set_audio(ac).write_videofile(final,codec="libx264",audio_codec="aac",verbose=False,logger=None)
+            data=open(final,"rb").read()
+        except: data=open(silent,"rb").read()
     for fn in os.listdir(tmp):
         try: os.unlink(os.path.join(tmp,fn))
         except: pass
@@ -287,28 +316,47 @@ def generate_video(slides, mp3_bytes, target_mins, prog_cb=None) -> bytes:
 # ── UI ────────────────────────────────────────────────────────
 
 st.markdown('<h1 class="main-title">📚 NoteVision AI</h1>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">AI-powered audio & video overview generator — Groq + Llama 3 (Free)</p>',
+st.markdown('<p class="subtitle">AI-powered audio & video overview — English & اردو | Groq + Llama 3 (Free)</p>',
             unsafe_allow_html=True)
 
 with st.sidebar:
+
     # API Key
     st.markdown('<div class="sec">🔑 Groq API Key</div>', unsafe_allow_html=True)
     key = get_key()
     if not key:
         key = st.text_input("Paste Groq API key", type="password", placeholder="gsk_…")
         if key: st.session_state["groq_key"] = key
-        st.markdown("""<div class="info-box">🆓 Free key at <b>console.groq.com</b><br>
-        Sign up → API Keys → Create Key → copy gsk_...</div>""", unsafe_allow_html=True)
+        st.markdown("""<div class="info-box">🆓 Free at <b>console.groq.com</b><br>
+        Sign up → API Keys → Create Key</div>""", unsafe_allow_html=True)
     else:
         st.success("✅ Groq API Key loaded")
+
+    # ── LANGUAGE SELECTION ───────────────────────────────────
+    st.markdown('<div class="sec">🌐 Output Language</div>', unsafe_allow_html=True)
+    language = st.radio(
+        "Language",
+        ["🇬🇧 English", "🇵🇰 اردو"],
+        horizontal=True,
+        key="language"
+    )
+    lang_code = "اردو" if "اردو" in language else "English"
+
+    if lang_code == "اردو":
+        st.success("🇵🇰 اردو زبان منتخب کی گئی")
+    else:
+        st.success("🇬🇧 English language selected")
 
     # Source
     st.markdown('<div class="sec">📋 Source Content</div>', unsafe_allow_html=True)
     src = st.radio("Input", ["Text / Topic", "Upload PDF"], label_visibility="collapsed")
     text_in = pdf_txt = ""
     if src == "Text / Topic":
+        placeholder = "مثال: 'پاکستان کی تاریخ' یا کوئی مضمون یہاں پیسٹ کریں..." \
+                      if lang_code=="اردو" else \
+                      "e.g. 'History of Pakistan'\nor paste any article…"
         text_in = st.text_area("Topic or paste article", height=150,
-            placeholder="e.g. 'History of Pakistan'\nor paste any article…")
+                               placeholder=placeholder)
     else:
         up = st.file_uploader("PDF", type=["pdf"])
         if up:
@@ -319,44 +367,37 @@ with st.sidebar:
             else:
                 st.error("Could not read PDF.")
 
-    # Settings
+    # Duration
     st.markdown('<div class="sec">⏱ Duration</div>', unsafe_allow_html=True)
-    minutes = st.select_slider("Length", [5, 8, 10, 12], value=5,
+    minutes = st.select_slider("Length", [5,8,10,12], value=5,
                                format_func=lambda x: f"{x} minutes")
 
     # ── VOICE SELECTION ──────────────────────────────────────
     st.markdown('<div class="sec">🎙 Voice Selection</div>', unsafe_allow_html=True)
 
-    gender = st.radio(
-        "Voice Gender",
-        ["👩 Female", "👨 Male"],
-        horizontal=True,
-        key="voice_gender"
-    )
-
-    if gender == "👩 Female":
-        voice_options = FEMALE_VOICES
-        st.info("👩 Female voice selected")
+    if lang_code == "اردو":
+        gender = st.radio("Voice Gender / صنف", ["👩 خاتون (Female)", "👨 مرد (Male)"],
+                          horizontal=True, key="voice_gender")
+        voice_options = URDU_FEMALE if "خاتون" in gender else URDU_MALE
+        st.info("🎙 Microsoft اردو Neural Voice — پاکستانی لہجہ")
+        gtts_lang = "ur"
     else:
-        voice_options = MALE_VOICES
-        st.info("👨 Male voice selected")
+        gender = st.radio("Voice Gender", ["👩 Female", "👨 Male"],
+                          horizontal=True, key="voice_gender")
+        voice_options = ENGLISH_FEMALE if "Female" in gender else ENGLISH_MALE
+        gtts_lang = "en"
 
-    voice_name = st.selectbox(
-        "Choose Voice",
-        options=list(voice_options.keys()),
-        key="voice_name"
-    )
-    selected_voice_id = voice_options[voice_name]
-    st.caption(f"🎤 Voice: `{selected_voice_id}`")
+    voice_name     = st.selectbox("Choose Voice", list(voice_options.keys()), key="voice_name")
+    selected_voice = voice_options[voice_name]
+    st.caption(f"🎤 `{selected_voice}`")
 
     if TTS_ENGINE == "gtts":
-        st.warning("⚠️ edge-tts not installed. Using gTTS (no male/female selection). Add edge-tts to requirements.txt")
+        st.warning("⚠️ edge-tts not installed. Install it for Urdu/male voice support.")
 
-    # Seconds per slide
+    # Video settings
     st.markdown('<div class="sec">🎬 Video Settings</div>', unsafe_allow_html=True)
     secs_slide = st.slider("Seconds per slide", 6, 20, 8)
-
-    gen_btn = st.button("✨ Generate Overview")
+    gen_btn    = st.button("✨ Generate Overview" if lang_code=="English" else "✨ جائزہ تیار کریں")
 
 # ── Generation ────────────────────────────────────────────────
 source = pdf_txt or text_in
@@ -365,31 +406,36 @@ if gen_btn:
     if not key:
         st.error("❌ Enter your Groq API key in the sidebar (free at console.groq.com)")
     elif not source.strip():
-        st.error("❌ Paste content or upload a PDF first.")
+        st.error("❌ Paste content or upload a PDF first." if lang_code=="English"
+                 else "❌ پہلے مواد پیسٹ کریں یا PDF اپ لوڈ کریں۔")
     else:
         prog   = st.progress(0, "Starting…")
         status = st.empty()
         try:
             # Script
-            prog.progress(8, f"🤖 Writing {minutes}-minute script…")
-            script = generate_script(source, minutes, key)
+            lang_label = "اردو" if lang_code=="اردو" else "English"
+            prog.progress(8, f"🤖 Writing {minutes}-min script in {lang_label}…")
+            script = generate_script(source, minutes, key, lang_code)
             slides = build_slides(script)
             wc     = len(script.split())
             prog.progress(30, f"✅ Script: {wc} words, {len(slides)} slides")
-            status.success(f"📝 Script ready: {wc} words, {len(slides)} sections")
+            status.success(f"📝 Script ready in {lang_label}: {wc} words, {len(slides)} sections")
 
-            with st.expander("📝 View Full Script", expanded=False):
-                st.markdown(script)
+            with st.expander("📝 View Full Script / مکمل اسکرپٹ دیکھیں", expanded=False):
+                if lang_code == "اردو":
+                    st.markdown(f'<div class="urdu-box">{script}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(script)
 
             # Audio
-            prog.progress(35, f"🎙 Generating audio with {voice_name}…")
-            status.info(f"🎙 Generating MP3 using **{voice_name}**… please wait")
+            prog.progress(35, f"🎙 Generating {lang_label} audio — {voice_name}…")
+            status.info(f"🎙 Generating MP3 using **{voice_name}**… please wait (~30s)")
             mp3 = b""
             if TTS_OK:
-                mp3  = generate_mp3(script, selected_voice_id)
-                dur  = get_audio_duration(mp3)
-                prog.progress(60, f"✅ Audio ready: {dur/60:.1f} minutes")
-                status.success(f"🎙 Audio ready: {dur/60:.1f} min — Voice: {voice_name}")
+                mp3 = generate_mp3(script, selected_voice, gtts_lang)
+                dur = get_audio_duration(mp3)
+                prog.progress(60, f"✅ Audio: {dur/60:.1f} min MP3 ready")
+                status.success(f"🎙 Audio ready: {dur/60:.1f} min — {voice_name}")
             else:
                 status.warning("TTS engine not available.")
 
@@ -398,46 +444,47 @@ if gen_btn:
             if CV2_OK and PIL_OK and mp3:
                 def upd(msg): status.info(msg)
                 prog.progress(63, "🎬 Building MP4 video…")
-                vid_data = generate_video(slides, mp3, minutes, upd)
+                vid_data = generate_video(slides, mp3, minutes, lang_code, upd)
                 if vid_data:
                     sz = len(vid_data)/1024/1024
-                    prog.progress(95, f"✅ Video ready: {sz:.1f} MB")
-                    status.success(f"🎬 Video ready: {sz:.1f} MB MP4")
-            else:
-                status.warning("OpenCV/PIL not available — video skipped.")
+                    prog.progress(95, f"✅ Video: {sz:.1f} MB MP4 ready")
+                    status.success(f"🎬 Video ready: {sz:.1f} MB")
 
-            prog.progress(100, "🎉 All done!")
+            prog.progress(100, "🎉 Done!")
             status.empty()
 
-            # Show results
+            # Results
             c1, c2 = st.columns(2)
+            fname_prefix = "NoteVision-Urdu" if lang_code=="اردو" else "NoteVision-English"
+
             with c1:
-                st.markdown("### 🎙 Audio Overview")
+                st.markdown("### 🎙 Audio / آڈیو")
                 if mp3:
                     dur = get_audio_duration(mp3)
-                    st.caption(f"🎤 Voice: **{voice_name}** • Duration: {dur/60:.1f} min • MP3")
+                    st.caption(f"🎤 {voice_name} • {dur/60:.1f} min • MP3 • {lang_label}")
                     st.audio(mp3, format="audio/mp3")
                     st.download_button("⬇ Download MP3", mp3,
-                        "NoteVision-audio.mp3", "audio/mpeg",
+                        f"{fname_prefix}-audio.mp3", "audio/mpeg",
                         use_container_width=True)
                 else:
                     st.warning("Audio not available.")
 
             with c2:
-                st.markdown("### 🎬 Video Overview")
+                st.markdown("### 🎬 Video / ویڈیو")
                 if vid_data:
                     dur = get_audio_duration(mp3) if mp3 else minutes*60
-                    st.caption(f"🎤 Voice: **{voice_name}** • Duration: {dur/60:.1f} min • MP4")
+                    st.caption(f"🎤 {voice_name} • {dur/60:.1f} min • MP4 • {lang_label}")
                     st.video(vid_data)
                     st.download_button("⬇ Download MP4", vid_data,
-                        "NoteVision-video.mp4", "video/mp4",
+                        f"{fname_prefix}-video.mp4", "video/mp4",
                         use_container_width=True)
                 else:
                     st.warning("Video not generated.")
 
+            dur = get_audio_duration(mp3) if mp3 else 0
             st.markdown(f"""<div class="success-box">
-            ✅ <b>Complete!</b> MP3 & MP4 generated using <b>{voice_name}</b>.<br>
-            Duration: {get_audio_duration(mp3)/60:.1f} minutes. Ready to play and download!
+            ✅ <b>Complete!</b> {lang_label} MP3 & MP4 generated using <b>{voice_name}</b>.<br>
+            Duration: {dur/60:.1f} minutes. Ready to play and download!
             </div>""", unsafe_allow_html=True)
 
         except Exception as e:
