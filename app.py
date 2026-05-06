@@ -109,6 +109,7 @@ def extract_pdf(f) -> str:
     return txt[:10000]
 
 def generate_script(content, minutes, key, language="English"):
+    import time
     client = Groq(api_key=key)
     words  = minutes * 130
 
@@ -137,14 +138,67 @@ def generate_script(content, minutes, key, language="English"):
             f"Write a full {minutes}-minute narration script about:\n\n{content[:7000]}"
         )
 
-    r = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        max_tokens=6000,
-        messages=[
-            {"role":"system","content": system_prompt},
-            {"role":"user",  "content": user_prompt}
-        ])
-    return r.choices[0].message.content
+    for attempt in range(3):
+        try:
+            r = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                max_tokens=6000,
+                messages=[
+                    {"role":"system","content": system_prompt},
+                    {"role":"user",  "content": user_prompt}
+                ])
+            return r.choices[0].message.content
+        except Exception as e:
+            err = str(e)
+            if "429" in err and attempt < 2:
+                wait = 60 + attempt * 30
+                st.warning(f"⏳ Rate limit hit. Auto-retrying in {wait} seconds... (attempt {attempt+1}/3)")
+                time.sleep(wait)
+            else:
+                raise
+
+def smart_filename(script, source, language="English") -> str:
+    """Extract a clean filename from the script title or first heading."""
+    # Try to get first ## heading from script
+    match = re.search(r'^## (.+)', script, flags=re.MULTILINE)
+    if match:
+        title = match.group(1).strip()
+    else:
+        # Fall back to first 60 chars of source
+        title = source.strip()[:60]
+
+    # For Urdu — transliterate common words or use first English words found
+    if language == "اردو":
+        # Extract any English words if present, else use "Urdu-Overview"
+        english_words = re.findall(r'[A-Za-z]{3,}', title)
+        if english_words:
+            title = "-".join(english_words[:4])
+        else:
+            # Transliterate a few common Urdu topic words
+            urdu_map = {
+                "پاکستان":"Pakistan","تاریخ":"Tarikh","سائنس":"Science",
+                "اسلام":"Islam","تعلیم":"Taleem","صحت":"Sehat",
+                "ٹیکنالوجی":"Technology","ادب":"Adab","معاشرہ":"Muashara",
+                "اقتصاد":"Iqtisad","سیاست":"Siyasat","ثقافت":"Saqafat",
+            }
+            for urdu, roman in urdu_map.items():
+                title = title.replace(urdu, roman)
+            # Remove remaining non-ASCII
+            title = re.sub(r'[^\x00-\x7F]+', '', title).strip()
+            if not title:
+                title = "Urdu-Overview"
+
+    # Clean: remove special chars, replace spaces with hyphens
+    title = re.sub(r'[^\w\s-]', '', title)
+    title = re.sub(r'\s+', '-', title.strip())
+    title = re.sub(r'-+', '-', title)
+    title = title[:50].strip('-')
+
+    if not title:
+        title = "NoteVision-Overview"
+
+    return title
+
 
 def build_slides(script):
     parts  = re.split(r'^## ', script, flags=re.MULTILINE)
@@ -418,6 +472,9 @@ if gen_btn:
             script = generate_script(source, minutes, key, lang_code)
             slides = build_slides(script)
             wc     = len(script.split())
+            # ── Smart filename based on actual content ──
+            fname  = smart_filename(script, source, lang_code)
+            st.caption(f"📁 Output filename: **{fname}**")
             prog.progress(30, f"✅ Script: {wc} words, {len(slides)} slides")
             status.success(f"📝 Script ready in {lang_label}: {wc} words, {len(slides)} sections")
 
@@ -455,7 +512,7 @@ if gen_btn:
 
             # Results
             c1, c2 = st.columns(2)
-            fname_prefix = "NoteVision-Urdu" if lang_code=="اردو" else "NoteVision-English"
+            fname_prefix = fname
 
             with c1:
                 st.markdown("### 🎙 Audio / آڈیو")
@@ -493,6 +550,6 @@ if gen_btn:
             if "401" in err or "invalid_api_key" in err.lower():
                 st.error("❌ Invalid Groq key. Copy again from console.groq.com")
             elif "429" in err:
-                st.error("❌ Rate limit. Wait 1 minute and try again.")
+                st.error("❌ Groq rate limit reached. The app will auto-retry next time. Please wait 1–2 minutes and click Generate again.")
             else:
                 st.error(f"❌ Error: {err}")
